@@ -211,6 +211,9 @@
 #define NUMBER_TYPE_INTERNATIONAL	(TP_A_EXT_NOEXT | TP_A_TON_INTERNATIONAL | TP_A_NPI_TEL_E164_E163) /* 0x91 */
 #define NUMBER_TYPE_NATIONAL		(TP_A_EXT_NOEXT | TP_A_TON_SUBSCRIBERNUM | TP_A_NPI_NATIONALNUM) /* 0xC8 */
 #define NUMBER_TYPE_ALPHANUMERIC	(TP_A_EXT_NOEXT | TP_A_TON_ALPHANUMERIC | TP_A_NPI_UNKNOWN) /* 0xD0 */
+/* maybe NUMBER_TYPE_NETWORKSHORT should be 0xB1 ??? */
+#define NUMBER_TYPE_NETWORKSHORT	(TP_A_EXT_NOEXT | TP_A_TON_NETSPECIFIC | TP_A_NPI_PRIVATENUM) /* 0xB9 */
+#define NUMBER_TYPE_UNKNOWN		(TP_A_EXT_NOEXT | TP_A_TON_UNKNOWN | TP_A_NPI_TEL_E164_E163) /* 0x81 */
 
 /* Reject Duplicate */
 #define PDUTYPE_RD_SHIFT			2
@@ -547,7 +550,11 @@ EXPORT_DEF ssize_t pdu_build(uint8_t *buffer, size_t length, size_t *tpdulen, co
 		dst_toa = NUMBER_TYPE_INTERNATIONAL;
 		++dst;
 	} else {
-		dst_toa = NUMBER_TYPE_INTERNATIONAL;
+		if (strlen(dst) < 6) {
+			dst_toa = NUMBER_TYPE_NETWORKSHORT;
+		} else {
+			dst_toa = NUMBER_TYPE_UNKNOWN;
+		}
 	}
 
 	/* count length of strings */
