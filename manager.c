@@ -89,8 +89,6 @@ static int manager_show_devices (struct mansession* s, const struct message* m)
 			astman_append (s, "SubscriberNumber: %s\r\n", pvt->subscriber_number);
 			astman_append (s, "SMSServiceCenter: %s\r\n", pvt->sms_scenter);
 			astman_append (s, "UseUCS2Encoding: %s\r\n", pvt->use_ucs2_encoding ? "Yes" : "No");
-			astman_append (s, "USSDUse7BitEncoding: %s\r\n", pvt->cusd_use_7bit_encoding ? "Yes" : "No");
-			astman_append (s, "USSDUseUCS2Decoding: %s\r\n", pvt->cusd_use_ucs2_decoding ? "Yes" : "No");
 			astman_append (s, "TasksInQueue: %u\r\n", PVT_STATE(pvt, at_tasks));
 			astman_append (s, "CommandsInQueue: %u\r\n", PVT_STATE(pvt, at_cmds));
 			astman_append (s, "CallWaitingState: %s\r\n", pvt->has_call_waiting ? "Enabled" : "Disabled");
@@ -135,7 +133,6 @@ static int manager_send_ussd (struct mansession* s, const struct message* m)
 	char		buf[256];
 	const char*	msg;
 	int		status;
-	void * msgid = NULL;
 
 	if (ast_strlen_zero (device))
 	{
@@ -149,8 +146,8 @@ static int manager_send_ussd (struct mansession* s, const struct message* m)
 		return 0;
 	}
 
-	msg = send_ussd(device, ussd, &status, &msgid);
-	snprintf(buf, sizeof (buf), "[%s] %s\r\nID: %p", device, msg, msgid);
+	msg = send_ussd(device, ussd, &status);
+	snprintf(buf, sizeof (buf), "[%s] %s", device, msg);
 	if(status)
 	{
 		astman_send_ack(s, m, buf);
@@ -170,11 +167,11 @@ static int manager_send_sms (struct mansession* s, const struct message* m)
 	const char*	message	= astman_get_header (m, "Message");
 	const char*	validity= astman_get_header (m, "Validity");
 	const char*	report	= astman_get_header (m, "Report");
+	const char*	payload	= astman_get_header (m, "Payload");
 
 	char		buf[256];
 	const char*	msg;
 	int		status;
-	void * msgid;
 
 	if (ast_strlen_zero (device))
 	{
@@ -194,44 +191,8 @@ static int manager_send_sms (struct mansession* s, const struct message* m)
 		return 0;
 	}
 
-	msg = send_sms(device, number, message, validity, report, &status, &msgid);
-	snprintf (buf, sizeof (buf), "[%s] %s\r\nID: %p", device, msg, msgid);
-	if(status)
-	{
-		astman_send_ack(s, m, buf);
-	}
-	else
-	{
-		astman_send_error(s, m, buf);
-	}
-
-	return 0;
-}
-
-static int manager_send_pdu (struct mansession* s, const struct message* m)
-{
-	const char*	device	= astman_get_header (m, "Device");
-	const char*	pdu	= astman_get_header (m, "PDU");
-
-	char		buf[256];
-	const char*	msg;
-	int		status;
-	void * msgid;
-
-	if (ast_strlen_zero (device))
-	{
-		astman_send_error (s, m, "Device not specified");
-		return 0;
-	}
-
-	if (ast_strlen_zero (pdu))
-	{
-		astman_send_error (s, m, "PDU not specified");
-		return 0;
-	}
-
-	msg = send_pdu(device, pdu, &status, &msgid);
-	snprintf (buf, sizeof (buf), "[%s] %s\r\nID: %p", device, msg, msgid);
+	msg = send_sms(device, number, message, validity, report, &status, payload, strlen(payload));
+	snprintf (buf, sizeof (buf), "[%s] %s", device, msg);
 	if(status)
 	{
 		astman_send_ack(s, m, buf);
@@ -245,18 +206,25 @@ static int manager_send_pdu (struct mansession* s, const struct message* m)
 }
 
 #/* */
-EXPORT_DEF void manager_event_sent_notify(const char * devname, const char * type, const void * id, const char * result)
+EXPORT_DEF void manager_event_report(const char * devname, const char *payload, size_t payload_len, const char *scts, const char *dt, int success, int type, const char *report_str)
 {
 	char buf[40];
-	snprintf(buf, sizeof(buf), "Dongle%sStatus", type);
+	snprintf(buf, sizeof(buf), "DongleReport");
 
 	manager_event (EVENT_FLAG_CALL, buf,
 		"Device: %s\r\n"
-		"ID: %p\r\n"
-		"Status: %s\r\n",
+		"Payload: %.*s\r\n"
+		"SCTS: %s\r\n"
+		"DT: %s\r\n"
+		"Success: %d\r\n"
+		"Type: %d\r\n"
+		"Report: %s\r\n",
 		devname,
-		id,
-		result
+		payload_len, payload,
+		scts, dt,
+		success,
+		type,
+		report_str
 	);
 }
 
@@ -625,8 +593,8 @@ static const struct dongle_manager
 	"Description: Send a ussd message to a dongle.\n\n"
 	"Variables: (Names marked with * are required)\n"
 	"	ActionID: <id>		Action ID for this transaction. Will be returned.\n"
-	"	*Device:  <device>	The dongle to which the ussd code will be send.\n"
-	"	*USSD:    <code>	The ussd code that will be send to the device.\n"
+	"	*Device:  <device>	The dongle to which the ussd code will be sent.\n"
+	"	*USSD:    <code>	The ussd code that will be sent to the device.\n"
 	 },
 	{
 	manager_send_sms,
@@ -637,19 +605,11 @@ static const struct dongle_manager
 	"Variables: (Names marked with * are required)\n"
 	"	ActionID: <id>		Action ID for this transaction. Will be returned.\n"
 	"	*Device:  <device>	The dongle to which the SMS be send.\n"
-	"	*Number:  <number>	The phone number to which the SMS will be send.\n"
-	"	*Message: <message>	The SMS message that will be send.\n"
-	},
-	{
-	manager_send_pdu,
-	EVENT_FLAG_CALL,
-	"DongleSendPDU",
-	"Send a PDU of message.",
-	"Description: Send a PDU of message from a dongle.\n\n"
-	"Variables: (Names marked with * are required)\n"
-	"	ActionID: <id>		Action ID for this transaction. Will be returned.\n"
-	"	*Device:  <device>	The dongle to which the PDU be send.\n"
-	"	*PDU:     <PDU>		The PDU of SMS.\n"
+	"	*Number:  <number>	The phone number to which the SMS will be sent.\n"
+	"	*Message: <message>	The SMS message that will be sent.\n"
+	"	*Validity: <message>	Validity period in minutes.\n"
+	"	*Report: <message>	Boolean flag for report request.\n"
+	"	*Payload: <message>	Unstructured data that will be included in delivery report.\n"
 	},
 	{
 	manager_ccwa_set,

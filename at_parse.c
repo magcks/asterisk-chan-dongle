@@ -283,82 +283,27 @@ EXPORT_DEF int at_parse_cmti (const char* str)
 	return sscanf (str, "+CMTI: %*[^,],%u", &index) == 1 ? index : -1;
 }
 
+/*!
+ * \brief Parse a CMSI notification
+ * \param str -- string to parse (null terminated)
+ * \param len -- string lenght
+ * @note str will be modified when the CMTI message is parsed
+ * \return -1 on error (parse error) or the index of the new sms message
+ */
 
-static const char * parse_cmgr_text(char ** str, size_t len, char * oa, size_t oa_len, str_encoding_t * oa_enc, char ** msg, str_encoding_t * msg_enc, pdu_udh_t *udh)
+EXPORT_DEF int at_parse_cdsi (const char* str)
 {
-	(void)(udh);
+	int index;
+
 	/*
-	 * parse cmgr info in the following TEXT format:
-	 * +CMGR: "<msg status>","+123456789",,timestamp<CR><LF>
-	 * <message text><CR><LF><CR><LF>
-	 * OK<CR><LF>
-	 *	or
-	 * +CMGR: "<msg status>","002B....",,timestamp<CR><LF>
-	 * <message text><CR><LF><CR><LF>
-	 * OK<CR><LF>
+	 * parse cmti info in the following format:
+	 * +CMTI: <mem>,<index>
 	 */
 
-	char delimiters[] = ",,,\n";
-	char * marks[STRLEN(delimiters)];
-	size_t length;
-
-	unsigned count = mark_line(*str, delimiters, marks);
-	if(count == ITEMS_OF(marks))
-	{
-		/* unquote number */
-		marks[0]++;
-		if(marks[0][0] == '"')
-			marks[0]++;
-		if(marks[1][-1] == '"')
-			marks[1]--;
-		length = marks[1] - marks[0] + 1;
-		if(oa_len < length)
-			return "Not enought space for store number";
-		*oa_enc = get_encoding(marks[0], length  - 1);
-		marks[1][0] = 0;
-		memcpy(oa, marks[0], length);
-
-		*msg = marks[3] + 1;
-		length = len - (*msg - *str);
-		*msg_enc = get_encoding(*msg, length);
-		return NULL;
-	}
-	else if(count > 0)
-		*str = marks[count - 1];
-
-	return "Can't parse +CMGR response text";
+	return sscanf (str, "+CDSI: %*[^,],%u", &index) == 1 ? index : -1;
 }
 
-static const char* parse_cmgr_pdu(char** str, attribute_unused size_t len, char* oa, size_t oa_len, str_encoding_t* oa_enc, char** msg, str_encoding_t* msg_enc, pdu_udh_t *udh)
-{
-	/*
-	 * parse cmgr info in the following PDU format
-	 * +CMGR: message_status,[address_text],TPDU_length<CR><LF>
-	 * SMSC_number_and_TPDU<CR><LF><CR><LF>
-	 * OK<CR><LF>
-	 *
-	 *	sample
-	 * +CMGR: 1,,31
-	 * 07911234567890F3040B911234556780F20008012150220040210C041F04400438043204350442<CR><LF><CR><LF>
-	 * OK<CR><LF>
-	 */
 
-	char delimiters[] = ",,\n";
-	char * marks[STRLEN(delimiters)];
-	char * end;
-	size_t tpdu_length;
-
-	if(mark_line(*str, delimiters, marks) == ITEMS_OF(marks))
-	{
-		tpdu_length = strtol(marks[1] + 1, &end, 10);
-		if(tpdu_length <= 0 || end[0] != '\r')
-			return "Invalid TPDU length in CMGR PDU status line";
-		*str = marks[2] + 1;
-		return pdu_parse(str, tpdu_length, oa, oa_len, oa_enc, msg, msg_enc, udh);
-	}
-
-	return "Can't parse +CMGR response";
-}
 
 /*!
  * \brief Parse a CMGR message
@@ -371,31 +316,78 @@ static const char* parse_cmgr_pdu(char** str, attribute_unused size_t len, char*
  * \retval -1 parse error
  */
 
-EXPORT_DEF const char * at_parse_cmgr(char ** str, size_t len, char * oa, size_t oa_len, str_encoding_t * oa_enc, char ** msg, str_encoding_t * msg_enc, pdu_udh_t *udh)
+EXPORT_DEF const char *at_parse_cmgr(char *str, size_t len, int *tpdu_type, char *sca, size_t sca_len, char *oa, size_t oa_len, char *scts, int *mr, int *st, char *dt, char *msg, size_t *msg_len, pdu_udh_t *udh)
 {
-	const char* rv = "Can't parse +CMGR response line";
-
 	/* skip "+CMGR:" */
-	*str += 6;
+	str += 6;
 	len -= 6;
 
 	/* skip leading spaces */
-	while(len > 0 && str[0][0] == ' ')
-	{
-		(*str)++;
-		len--;
+	while (len > 0 && *str == ' ') {
+		++str;
+		--len;
 	}
 
-	if(len > 0)
-	{
-		/* check PDU or TEXT mode */
-		const char* (*fptr)(char** str, size_t len, char* num, size_t num_len, str_encoding_t * oa_enc, char** msg, str_encoding_t * msg_enc, pdu_udh_t *udh);
-		fptr = str[0][0] == '"' ? parse_cmgr_text : parse_cmgr_pdu;
-
-		rv = (*fptr)(str, len, oa, oa_len, oa_enc, msg, msg_enc, udh);
+	if (len <= 0) {
+		return "Can't parse +CMGR response line";
+	}
+	if (str[0] == '"') {
+		return "Parsing messages in TEXT mode is not supported anymore; This message should never appear. Nevertheless, if this message appears, please report on GitHub.";
 	}
 
-	return rv;
+
+	/*
+	* parse cmgr info in the following PDU format
+	* +CMGR: message_status,[address_text],TPDU_length<CR><LF>
+	* SMSC_number_and_TPDU<CR><LF><CR><LF>
+	* OK<CR><LF>
+	*
+	*	sample
+	* +CMGR: 1,,31
+	* 07911234567890F3040B911234556780F20008012150220040210C041F04400438043204350442<CR><LF><CR><LF>
+	* OK<CR><LF>
+	*/
+
+	char delimiters[] = ",,\n";
+	char *marks[STRLEN(delimiters)];
+	char *end;
+	size_t tpdu_length;
+	int16_t msg16_tmp[256];
+
+	if (mark_line(str, delimiters, marks) == ITEMS_OF(marks)) {
+		tpdu_length = strtol(marks[1] + 1, &end, 10);
+		if(tpdu_length <= 0 || end[0] != '\r')
+			return "Invalid TPDU length in CMGR PDU status line";
+		str = marks[2] + 1;
+// 		ast_verb(3, "PDU str: %s\n", str);
+		int pdu_length = (unhex(str, str) + 1) / 2;
+		if (pdu_length < 0) return "Cannot unhex";
+		int res, i = 0;
+		res = pdu_parse_sca(str + i, pdu_length - i, sca, sca_len);
+		if (res < 0) return "Cannot parse SCA";
+		i += res;
+		if (tpdu_length > pdu_length - i) return "TPDU length not matched with actual length";
+		res = tpdu_parse_type(str + i, pdu_length - i, tpdu_type);
+		if (res < 0) return "Cannot parse TPDU type";
+		i += res;
+		switch (PDUTYPE_MTI(*tpdu_type)) {
+		// TODO: PDUTYPE_MTI_SMS_SUBMIT_REPORT
+		case PDUTYPE_MTI_SMS_STATUS_REPORT:
+			res = tpdu_parse_status_report(str + i, pdu_length - i, mr, oa, oa_len, scts, dt, st);
+			break;
+		case PDUTYPE_MTI_SMS_DELIVER:
+			res = tpdu_parse_deliver(str + i, pdu_length - i, *tpdu_type, oa, oa_len, scts, msg16_tmp, udh);
+			res = ucs2_to_utf8(msg16_tmp, res, msg, res * 2 + 2);
+			if (res < 0) return "Cannot convert from UCS2";
+			*msg_len = res;
+			msg[res] = '\0';
+			break;
+		default:
+			res = -1;
+		}
+		if (res < 0) return "Cannot parse TPDU";
+		return NULL;
+	}
 }
 
 /*!

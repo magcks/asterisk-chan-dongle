@@ -28,6 +28,7 @@
  * \author Dave Bowerman <david.bowerman@gmail.com>
  * \author Dmitry Vagin <dmitry2004@yandex.ru>
  * \author bg <bg_one@mail.ru>
+ * \author Max von Buelow <max@m9x.de>
  *
  * \ingroup channel_drivers
  */
@@ -300,8 +301,6 @@ static void disconnect_dongle (struct pvt* pvt)
 	{
 		/* unaffected in case of restart */
 		pvt->use_ucs2_encoding = 0;
-		pvt->cusd_use_7bit_encoding = 0;
-		pvt->cusd_use_ucs2_decoding = 1;
 		pvt->gsm_reg_status = -1;
 		pvt->rssi = 0;
 		pvt->linkmode = 0;
@@ -371,6 +370,27 @@ EXPORT_DEF void clean_read_data(const char * devname, int fd)
 	}
 }
 
+static void handle_expired_reports(struct pvt *pvt)
+{
+	char dst[256], payload[4096];
+	ssize_t payload_len = smsdb_outgoing_purge_one(dst, payload);
+	if (payload_len >= 0) {
+		ast_verb (3, "[%s] TTL payload: %.*s\n", PVT_ID(pvt), payload_len, payload);
+		channel_var_t vars[] =
+		{
+			{ "SMS_REPORT_PAYLOAD", payload },
+			{ "SMS_REPORT_TS", "" },
+			{ "SMS_REPORT_DT", "" },
+			{ "SMS_REPORT_SUCCESS", "0" },
+			{ "SMS_REPORT_TYPE", "t" },
+			{ "SMS_REPORT", "" },
+			{ NULL, NULL },
+		};
+		start_local_channel(pvt, "report", dst, vars);
+		manager_event_report(PVT_ID(pvt), payload, payload_len, "", "", 0, 2, "");
+	}
+}
+
 
 /*!
  * \brief Check if the module is unloading.
@@ -416,6 +436,8 @@ static void* do_monitor_phone (void* data)
 	while (1)
 	{
 		ast_mutex_lock (&pvt->lock);
+
+		handle_expired_reports(pvt);
 
 		if (port_status (pvt->data_fd) || port_status (pvt->audio_fd))
 		{
@@ -1422,7 +1444,6 @@ static struct pvt * pvt_create(const pvt_config_t * settings)
 		pvt->audio_fd			= -1;
 		pvt->data_fd			= -1;
 		pvt->timeout			= DATA_READ_TIMEOUT;
-		pvt->cusd_use_ucs2_decoding	=  1;
 		pvt->gsm_reg_status		= -1;
 
 		ast_copy_string (pvt->provider_name, "NONE", sizeof (pvt->provider_name));
