@@ -215,8 +215,6 @@ static char* cli_show_device_state (struct ast_cli_entry* e, int cmd, struct ast
 		ast_cli (a->fd, "  Subscriber Number       : %s\n", pvt->subscriber_number);
 		ast_cli (a->fd, "  SMS Service Center      : %s\n", pvt->sms_scenter);
 		ast_cli (a->fd, "  Use UCS-2 encoding      : %s\n", pvt->use_ucs2_encoding ? "Yes" : "No");
-		ast_cli (a->fd, "  USSD use 7 bit encoding : %s\n", pvt->cusd_use_7bit_encoding ? "Yes" : "No");
-		ast_cli (a->fd, "  USSD use UCS-2 decoding : %s\n", pvt->cusd_use_ucs2_decoding ? "Yes" : "No");
 		ast_cli (a->fd, "  Tasks in queue          : %u\n", PVT_STATE(pvt, at_tasks));
 		ast_cli (a->fd, "  Commands in queue       : %u\n", PVT_STATE(pvt, at_cmds));
 		ast_cli (a->fd, "  Call Waiting            : %s\n", pvt->has_call_waiting ? "Enabled" : "Disabled" );
@@ -424,7 +422,6 @@ static char* cli_ussd (struct ast_cli_entry* e, int cmd, struct ast_cli_args* a)
 {
 	const char * msg;
 	int status;
-	void * msgid;
 
 	switch (cmd)
 	{
@@ -449,11 +446,8 @@ static char* cli_ussd (struct ast_cli_entry* e, int cmd, struct ast_cli_args* a)
 		return CLI_SHOWUSAGE;
 	}
 
-	msg = send_ussd(a->argv[2], a->argv[3], &status, &msgid);
-	if(status)
-		ast_cli (a->fd, "[%s] %s with id %p\n", a->argv[2], msg, msgid);
-	else
-		ast_cli (a->fd, "[%s] %s\n", a->argv[2], msg);
+	msg = send_ussd(a->argv[2], a->argv[3], &status);
+	ast_cli (a->fd, "[%s] %s\n", a->argv[2], msg);
 
 	return CLI_SUCCESS;
 }
@@ -464,7 +458,6 @@ static char* cli_sms (struct ast_cli_entry* e, int cmd, struct ast_cli_args* a)
 	struct ast_str * buf;
 	int i;
 	int status;
-	void * msgid;
 
 	switch (cmd)
 	{
@@ -501,18 +494,15 @@ static char* cli_sms (struct ast_cli_entry* e, int cmd, struct ast_cli_args* a)
 		}
 	}
 
-	msg = send_sms(a->argv[2], a->argv[3], ast_str_buffer(buf), 0, "1", &status, &msgid);
+	msg = send_sms(a->argv[2], a->argv[3], ast_str_buffer(buf), 0, "1", &status, "CLI identify me", 15);
 	ast_free (buf);
 
-	if(status)
-		ast_cli(a->fd, "[%s] %s with id %p\n", a->argv[2], msg, msgid);
-	else
-		ast_cli(a->fd, "[%s] %s\n", a->argv[2], msg);
+	ast_cli(a->fd, "[%s] %s\n", a->argv[2], msg);
 
 	return CLI_SUCCESS;
 }
 
-static char * cli_pdu(struct ast_cli_entry * e, int cmd, struct ast_cli_args * a)
+static char * cli_pdu(struct ast_cli_entry * e, int cmd, struct ast_cli_args * a) // DEPRECATED
 {
 	const char * msg;
 	int status;
@@ -540,7 +530,7 @@ static char * cli_pdu(struct ast_cli_entry * e, int cmd, struct ast_cli_args * a
 		return CLI_SHOWUSAGE;
 	}
 
-	msg = send_pdu(a->argv[2], a->argv[3], &status, &msgid);
+	msg = "Raw PDU support dropped";
 
 	if(status)
 		ast_cli(a->fd, "[%s] %s with id %p\n", a->argv[2], msg, msgid);
