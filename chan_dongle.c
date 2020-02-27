@@ -71,6 +71,7 @@ ASTERISK_FILE_VERSION(__FILE__, "$Rev: " PACKAGE_REVISION " $")
 #include "dc_config.h"			/* dc_uconfig_fill() dc_gconfig_fill() dc_sconfig_fill()  */
 #include "pdiscovery.h"			/* pdiscovery_lookup() pdiscovery_init() pdiscovery_fini() */
 #include "smsdb.h"
+#include "error.h"
 
 EXPORT_DEF const char * const dev_state_strs[4] = { "stop", "restart", "remove", "start" };
 EXPORT_DEF public_state_t * gpublic;
@@ -372,7 +373,7 @@ EXPORT_DEF void clean_read_data(const char * devname, int fd)
 
 static void handle_expired_reports(struct pvt *pvt)
 {
-	char dst[256], payload[4096];
+	char dst[SMSDB_DST_MAX_LEN], payload[SMSDB_PAYLOAD_MAX_LEN];
 	ssize_t payload_len = smsdb_outgoing_purge_one(dst, payload);
 	if (payload_len >= 0) {
 		ast_verb (3, "[%s] TTL payload: %.*s\n", PVT_ID(pvt), payload_len, payload);
@@ -424,7 +425,7 @@ static void* do_monitor_phone (void* data)
 	clean_read_data(dev, fd);
 
 	/* schedule dongle initilization  */
-	if (at_enque_initialization (&pvt->sys_chan, CMD_AT))
+	if (at_enqueue_initialization(&pvt->sys_chan, CMD_AT))
 	{
 		ast_log (LOG_ERROR, "[%s] Error adding initialization commands to queue\n", dev);
 		goto e_cleanup;
@@ -466,7 +467,7 @@ static void* do_monitor_phone (void* data)
 				ast_log (LOG_ERROR, "[%s] timedout while waiting '%s' in response to '%s'\n", dev, at_res2str (ecmd->res), at_cmd2str (ecmd->cmd));
 				goto e_cleanup;
 			}
-			at_enque_ping(&pvt->sys_chan);
+			at_enqueue_ping(&pvt->sys_chan);
 			ast_mutex_unlock (&pvt->lock);
 			continue;
 		}
@@ -956,24 +957,20 @@ EXPORT_DEF struct pvt * find_device_ex(struct public_state * state, const char *
 }
 
 #/* return locked pvt or NULL */
-EXPORT_DEF struct pvt * find_device_ext (const char * name, const char ** reason)
+EXPORT_DEF struct pvt * find_device_ext (const char * name)
 {
 	char * res = "";
 	struct pvt * pvt = find_device(name);
 
-	if(pvt)
-	{
-		if(!pvt_enabled(pvt))
-		{
+	if (pvt) {
+		if (!pvt_enabled(pvt)) {
 			ast_mutex_unlock (&pvt->lock);
-			res = "device disabled";
+			chan_dongle_err = E_DEVICE_DISABLED;
 			pvt = NULL;
 		}
+	} else {
+		chan_dongle_err = E_DEVICE_NOT_FOUND;
 	}
-	else
-		res = "no such device";
-	if(reason)
-		*reason = res;
 	return pvt;
 }
 

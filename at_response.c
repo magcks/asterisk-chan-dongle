@@ -26,6 +26,7 @@
 #include "manager.h"
 #include "channel.h"				/* channel_queue_hangup() channel_queue_control() */
 #include "smsdb.h"
+#include "error.h"
 
 #define DEF_STR(str)	str,STRLEN(str)
 
@@ -394,7 +395,7 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
 				if (!pvt->initialized)
 				{
 					/* continue initialization in other job at cmd CMD_AT_CMGF */
-					if (at_enque_initialization(task->cpvt, CMD_AT_CMGF))
+					if (at_enqueue_initialization(task->cpvt, CMD_AT_CMGF))
 					{
 						ast_log (LOG_ERROR, "[%s] Error schedule initialization commands\n", PVT_ID(pvt));
 						goto e_return;
@@ -423,7 +424,7 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
 					if (pvt->has_voice)
 					{
 						/* continue initialization in other job at cmd CMD_AT_CSQ */
-						if (at_enque_initialization(task->cpvt, CMD_AT_CSQ))
+						if (at_enqueue_initialization(task->cpvt, CMD_AT_CSQ))
 						{
 							ast_log (LOG_ERROR, "[%s] Error querying signal strength\n", PVT_ID(pvt));
 							goto e_return;
@@ -497,7 +498,8 @@ static int at_response_error (struct pvt* pvt, at_res_t res)
 				pvt_try_restate(pvt);
 
 				{
-					char payload[4096], dst[256];
+					char payload[SMSDB_PAYLOAD_MAX_LEN];
+					char dst[SMSDB_DST_MAX_LEN];
 					ssize_t payload_len = smsdb_outgoing_clear(task->uid, dst, payload);
 					if (payload_len >= 0) {
 						ast_verb (3, "[%s] Error payload: %.*s\n", PVT_ID(pvt), payload_len, payload);
@@ -613,9 +615,9 @@ static int at_response_mode (struct pvt* pvt, char* str, size_t len)
 
 static void request_clcc(struct pvt* pvt)
 {
-	if (at_enque_clcc(&pvt->sys_chan))
+	if (at_enqueue_clcc(&pvt->sys_chan))
 	{
-		ast_log (LOG_ERROR, "[%s] Error enque List Current Calls request\n", PVT_ID(pvt));
+		ast_log(LOG_ERROR, "[%s] Error enqueue List Current Calls request\n", PVT_ID(pvt));
 	}
 }
 
@@ -669,7 +671,7 @@ static int at_response_orig (struct pvt* pvt, const char* str)
 			if(pvt->volume_sync_step == VOLUME_SYNC_BEGIN)
 			{
 				pvt->volume_sync_step = VOLUME_SYNC_BEGIN;
-				if (at_enque_volsync (cpvt))
+				if (at_enqueue_volsync(cpvt))
 				{
 					ast_log (LOG_ERROR, "[%s] Error synchronize audio level\n", PVT_ID(pvt));
 				}
@@ -839,11 +841,11 @@ static int at_response_conn (struct pvt* pvt, const char* str)
 			PVT_STAT(pvt, calls_answered[cpvt->dir]) ++;
 			change_channel_state(cpvt, CALL_STATE_ACTIVE, 0);
 			if(CPVT_TEST_FLAG(cpvt, CALL_FLAG_CONFERENCE))
-				at_enque_conference(cpvt);
+				at_enqueue_conference(cpvt);
 		}
 		else
 		{
-			at_enque_hangup(&pvt->sys_chan, call_index);
+			at_enqueue_hangup(&pvt->sys_chan, call_index);
 			ast_log (LOG_ERROR, "[%s] answered incoming call with not exists call idx %d, hanging up!\n", PVT_ID(pvt), call_index);
 		}
 	}
@@ -874,7 +876,7 @@ static int start_pbx(struct pvt* pvt, const char * number, int call_idx, call_st
 	{
 		ast_log (LOG_ERROR, "[%s] Unable to allocate channel for incoming call\n", PVT_ID(pvt));
 
-		if (at_enque_hangup (&pvt->sys_chan, call_idx))
+		if (at_enqueue_hangup(&pvt->sys_chan, call_idx))
 		{
 			ast_log (LOG_ERROR, "[%s] Error sending AT+CHUP command\n", PVT_ID(pvt));
 		}
@@ -1044,7 +1046,7 @@ static int at_response_clcc (struct pvt* pvt, char* str)
 	call will be activated but no voice
 */
 			ast_debug (1, "[%s] all %u call held, try activate some\n",  PVT_ID(pvt), all);
-			if(at_enque_flip_hold(&pvt->sys_chan))
+			if (at_enqueue_flip_hold(&pvt->sys_chan))
 			{
 				ast_log (LOG_ERROR, "[%s] can't flip active and hold/waiting calls \n", PVT_ID(pvt));
 			}
@@ -1143,7 +1145,7 @@ static int at_response_ring (struct pvt* pvt)
 		/* We only want to syncronize volume on the first ring and if no channels yes */
 		if (pvt->volume_sync_step == VOLUME_SYNC_BEGIN && PVT_NO_CHANS(pvt))
 		{
-			if (at_enque_volsync (&pvt->sys_chan))
+			if (at_enqueue_volsync(&pvt->sys_chan))
 			{
 				ast_log (LOG_ERROR, "[%s] Error synchronize audio level\n", PVT_ID(pvt));
 			}
@@ -1181,7 +1183,7 @@ static int at_response_cmti (struct pvt* pvt, const char* str)
 
 		if (pvt_enabled(pvt))
 		{
-			if (at_enque_retrive_sms (&pvt->sys_chan, index, CONF_SHARED(pvt, autodeletesms)))
+			if (at_enqueue_retrieve_sms(&pvt->sys_chan, index, CONF_SHARED(pvt, autodeletesms)))
 			{
 				ast_log (LOG_ERROR, "[%s] Error sending CMGR to retrieve SMS message\n", PVT_ID(pvt));
 				return -1;
@@ -1216,7 +1218,7 @@ static int at_response_cdsi (struct pvt* pvt, const char* str)
 
 		if (pvt_enabled(pvt))
 		{
-			if (at_enque_retrive_sms (&pvt->sys_chan, index, CONF_SHARED(pvt, autodeletesms)))
+			if (at_enqueue_retrieve_sms (&pvt->sys_chan, index, CONF_SHARED(pvt, autodeletesms)))
 			{
 				ast_log (LOG_ERROR, "[%s] Error sending CMGR to retrieve SMS message\n", PVT_ID(pvt));
 				return -1;
@@ -1250,8 +1252,7 @@ static int at_response_cmgr (struct pvt* pvt, const char * str, size_t len)
 	char scts[64], dt[64];
 	int mr, st;
 	char*		msg[4096];
-	const char*	err;
-	ssize_t		res;
+	int		res;
 	char		text_base64[40800];
 	size_t		msg_len;
 	int tpdu_type;
@@ -1261,7 +1262,7 @@ static int at_response_cmgr (struct pvt* pvt, const char * str, size_t len)
 	int fullmsg_len;
 	int csms_cnt;
 	char buf[512];
-	char payload[4096];
+	char payload[SMSDB_PAYLOAD_MAX_LEN];
 	ssize_t payload_len;
 	int status_report[256];
 
@@ -1274,9 +1275,9 @@ static int at_response_cmgr (struct pvt* pvt, const char * str, size_t len)
 			pvt->incoming_sms = 0;
 			pvt_try_restate(pvt);
 
-			err = at_parse_cmgr(str, len, &tpdu_type, sca, sizeof(sca), oa, sizeof(oa), scts, &mr, &st, dt, msg, &msg_len, &udh);
-			if (err) {
-				ast_log(LOG_WARNING, "[%s] Error parsing incoming message '%s': %s\n", PVT_ID(pvt), str, err);
+			res = at_parse_cmgr(str, len, &tpdu_type, sca, sizeof(sca), oa, sizeof(oa), scts, &mr, &st, dt, msg, &msg_len, &udh);
+			if (res < 0) {
+				ast_log(LOG_WARNING, "[%s] Error parsing incoming message: %s\n", PVT_ID(pvt), error2str(chan_dongle_err));
 				return 0;
 			}
 			switch (PDUTYPE_MTI(tpdu_type)) {
@@ -1451,17 +1452,17 @@ static int at_response_cusd (struct pvt * pvt, char * str, size_t len)
 		if (res < 0) {
 			return -1;
 		}
-		res = ucs2_to_utf8(out_ucs2, res, cusd_utf8_str, sizeof(cusd_utf8_str));
+		res = ucs2_to_utf8(out_ucs2, res, cusd_utf8_str, sizeof(cusd_utf8_str) - 1);
 	} else if (dcs == 1) { // ASCII
 		res = strlen(cusd);
-		if (res > sizeof(cusd_utf8_str)) {
+		if (res > sizeof(cusd_utf8_str) - 1) {
 			res = -1;
 		} else {
 			memcpy(cusd_utf8_str, cusd, res);
 		}
 	} else if (dcs == 2) { // UCS-2
 		int cusd_nibbles = unhex(cusd, cusd);
-		res = ucs2_to_utf8(out_ucs2, (cusd_nibbles + 1) / 4, cusd_utf8_str, sizeof(cusd_utf8_str));
+		res = ucs2_to_utf8(out_ucs2, (cusd_nibbles + 1) / 4, cusd_utf8_str, sizeof(cusd_utf8_str) - 1);
 	}
 	if (res < 0) {
 		return -1;
@@ -1615,7 +1616,7 @@ static int at_response_creg (struct pvt* pvt, char* str, size_t len)
 	char*	lac;
 	char*	ci;
 
-	if (at_enque_cops (&pvt->sys_chan))
+	if (at_enqueue_cops(&pvt->sys_chan))
 	{
 		ast_log (LOG_ERROR, "[%s] Error sending query for provider name\n", PVT_ID(pvt));
 	}
@@ -1631,7 +1632,7 @@ static int at_response_creg (struct pvt* pvt, char* str, size_t len)
 //#ifdef ISSUE_CCWA_STATUS_CHECK
 		/* only if gsm_registered 0 -> 1 ? */
 		if(!pvt->gsm_registered && CONF_SHARED(pvt, callwaiting) != CALL_WAITING_AUTO)
-			at_enque_set_ccwa(&pvt->sys_chan, 0, 0, CONF_SHARED(pvt, callwaiting));
+			at_enqueue_set_ccwa(&pvt->sys_chan, CONF_SHARED(pvt, callwaiting));
 //#endif
 		pvt->gsm_registered = 1;
 		manager_event_device_status(PVT_ID(pvt), "Register");
@@ -1808,7 +1809,8 @@ int at_response (struct pvt* pvt, const struct iovec iov[2], int iovcnt, at_res_
 				{
 					int res = at_parse_cmgs(str);
 
-					char payload[4096], dst[256];
+					char payload[SMSDB_PAYLOAD_MAX_LEN];
+					char dst[SMSDB_DST_MAX_LEN];
 					ssize_t payload_len = smsdb_outgoing_part_put(task->uid, res, dst, payload);
 					if (payload_len >= 0) {
 						ast_verb (3, "[%s] Error payload: %.*s\n", PVT_ID(pvt), payload_len, payload);

@@ -1,4 +1,6 @@
 #include <stdio.h>
+#include <string.h>
+
 #include "pdu.h"
 #include "gsm7_luts.h"
 

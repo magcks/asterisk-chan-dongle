@@ -20,6 +20,7 @@
 #include "mutils.h"			/* ITEMS_OF() */
 #include "chan_dongle.h"
 #include "pdu.h"			/* pdu_parse() */
+#include "error.h"
 
 #/* */
 static unsigned mark_line(char * line, const char * delimiters, char * pointers[])
@@ -316,7 +317,7 @@ EXPORT_DEF int at_parse_cdsi (const char* str)
  * \retval -1 parse error
  */
 
-EXPORT_DEF const char *at_parse_cmgr(char *str, size_t len, int *tpdu_type, char *sca, size_t sca_len, char *oa, size_t oa_len, char *scts, int *mr, int *st, char *dt, char *msg, size_t *msg_len, pdu_udh_t *udh)
+EXPORT_DEF int at_parse_cmgr(char *str, size_t len, int *tpdu_type, char *sca, size_t sca_len, char *oa, size_t oa_len, char *scts, int *mr, int *st, char *dt, char *msg, size_t *msg_len, pdu_udh_t *udh)
 {
 	/* skip "+CMGR:" */
 	str += 6;
@@ -329,10 +330,12 @@ EXPORT_DEF const char *at_parse_cmgr(char *str, size_t len, int *tpdu_type, char
 	}
 
 	if (len <= 0) {
-		return "Can't parse +CMGR response line";
+		chan_dongle_err = E_PARSE_CMGR_LINE;
+		return -1;
 	}
 	if (str[0] == '"') {
-		return "Parsing messages in TEXT mode is not supported anymore; This message should never appear. Nevertheless, if this message appears, please report on GitHub.";
+		chan_dongle_err = E_DEPRECATED_CMGR_TEXT;
+		return -1;
 	}
 
 
@@ -354,40 +357,65 @@ EXPORT_DEF const char *at_parse_cmgr(char *str, size_t len, int *tpdu_type, char
 	size_t tpdu_length;
 	int16_t msg16_tmp[256];
 
-	if (mark_line(str, delimiters, marks) == ITEMS_OF(marks)) {
-		tpdu_length = strtol(marks[1] + 1, &end, 10);
-		if(tpdu_length <= 0 || end[0] != '\r')
-			return "Invalid TPDU length in CMGR PDU status line";
-		str = marks[2] + 1;
-// 		ast_verb(3, "PDU str: %s\n", str);
-		int pdu_length = (unhex(str, str) + 1) / 2;
-		if (pdu_length < 0) return "Cannot unhex";
-		int res, i = 0;
-		res = pdu_parse_sca(str + i, pdu_length - i, sca, sca_len);
-		if (res < 0) return "Cannot parse SCA";
-		i += res;
-		if (tpdu_length > pdu_length - i) return "TPDU length not matched with actual length";
-		res = tpdu_parse_type(str + i, pdu_length - i, tpdu_type);
-		if (res < 0) return "Cannot parse TPDU type";
-		i += res;
-		switch (PDUTYPE_MTI(*tpdu_type)) {
-		// TODO: PDUTYPE_MTI_SMS_SUBMIT_REPORT
-		case PDUTYPE_MTI_SMS_STATUS_REPORT:
-			res = tpdu_parse_status_report(str + i, pdu_length - i, mr, oa, oa_len, scts, dt, st);
-			break;
-		case PDUTYPE_MTI_SMS_DELIVER:
-			res = tpdu_parse_deliver(str + i, pdu_length - i, *tpdu_type, oa, oa_len, scts, msg16_tmp, udh);
-			res = ucs2_to_utf8(msg16_tmp, res, msg, res * 2 + 2);
-			if (res < 0) return "Cannot convert from UCS2";
-			*msg_len = res;
-			msg[res] = '\0';
-			break;
-		default:
-			res = -1;
-		}
-		if (res < 0) return "Cannot parse TPDU";
-		return NULL;
+	if (mark_line(str, delimiters, marks) != ITEMS_OF(marks)) {
+		chan_dongle_err = E_PARSE_CMGR_LINE;
 	}
+	tpdu_length = strtol(marks[1] + 1, &end, 10);
+	if (tpdu_length <= 0 || end[0] != '\r') {
+		chan_dongle_err = E_INVALID_TPDU_LENGTH;
+		return -1;
+	}
+	str = marks[2] + 1;
+
+	int pdu_length = (unhex(str, str) + 1) / 2;
+	if (pdu_length < 0) {
+		chan_dongle_err = E_MALFORMED_HEXSTR;
+		return -1;
+	}
+	int res, i = 0;
+	res = pdu_parse_sca(str + i, pdu_length - i, sca, sca_len);
+	if (res < 0) {
+		/* tpdu_parse_sca sets chan_dongle_err */
+		return -1;
+	}
+	i += res;
+	if (tpdu_length > pdu_length - i) {
+		chan_dongle_err = E_INVALID_TPDU_LENGTH;
+		return -1;
+	}
+	res = tpdu_parse_type(str + i, pdu_length - i, tpdu_type);
+	if (res < 0) {
+		/* tpdu_parse_type sets chan_dongle_err */
+		return -1;
+	}
+	i += res;
+	switch (PDUTYPE_MTI(*tpdu_type)) {
+	case PDUTYPE_MTI_SMS_STATUS_REPORT:
+		res = tpdu_parse_status_report(str + i, pdu_length - i, mr, oa, oa_len, scts, dt, st);
+		if (res < 0) {
+			/* tpdu_parse_status_report sets chan_dongle_err */
+			return -1;
+		}
+		break;
+	case PDUTYPE_MTI_SMS_DELIVER:
+		res = tpdu_parse_deliver(str + i, pdu_length - i, *tpdu_type, oa, oa_len, scts, msg16_tmp, udh);
+		if (res < 0) {
+			/* tpdu_parse_deliver sets chan_dongle_err */
+			return -1;
+		}
+		res = ucs2_to_utf8(msg16_tmp, res, msg, res * 2 + 2);
+		if (res < 0) {
+			chan_dongle_err = E_PARSE_UCS2;
+			return -1;
+		}
+		*msg_len = res;
+		msg[res] = '\0';
+		break;
+	default:
+		chan_dongle_err = E_INVALID_TPDU_TYPE;
+		return -1;
+	}
+	return 0;
 }
 
 /*!

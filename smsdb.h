@@ -7,6 +7,9 @@
 
 #include "export.h"			/* EXPORT_DECL EXPORT_DEF */
 
+#define SMSDB_PAYLOAD_MAX_LEN 4096
+#define SMSDB_DST_MAX_LEN 256
+
 EXPORT_DECL int smsdb_init();
 EXPORT_DECL int smsdb_put(const char *id, const char *addr, int ref, int parts, int order, const char *msg, char *out);
 EXPORT_DECL int smsdb_get_refid(const char *id, const char *addr);

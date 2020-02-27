@@ -23,6 +23,7 @@
 #include "manager.h"
 #include "chan_dongle.h"			/* devices */
 #include "helpers.h"				/* ITEMS_OF() send_ccwa_set() send_reset() send_sms() send_ussd() */
+#include "error.h"
 
 static char * espace_newlines(const char * text);
 
@@ -131,8 +132,6 @@ static int manager_send_ussd (struct mansession* s, const struct message* m)
 	const char*	ussd	= astman_get_header (m, "USSD");
 
 	char		buf[256];
-	const char*	msg;
-	int		status;
 
 	if (ast_strlen_zero (device))
 	{
@@ -146,16 +145,9 @@ static int manager_send_ussd (struct mansession* s, const struct message* m)
 		return 0;
 	}
 
-	msg = send_ussd(device, ussd, &status);
-	snprintf(buf, sizeof (buf), "[%s] %s", device, msg);
-	if(status)
-	{
-		astman_send_ack(s, m, buf);
-	}
-	else
-	{
-		astman_send_error(s, m, buf);
-	}
+	int res = send_ussd(device, ussd);
+	snprintf(buf, sizeof (buf), "[%s] %s", device, res < 0 ? error2str(chan_dongle_err) : "USSD queued for send");
+	(res == 0 ? astman_send_ack : astman_send_error)(s, m, buf);
 
 	return 0;
 }
@@ -170,8 +162,6 @@ static int manager_send_sms (struct mansession* s, const struct message* m)
 	const char*	payload	= astman_get_header (m, "Payload");
 
 	char		buf[256];
-	const char*	msg;
-	int		status;
 
 	if (ast_strlen_zero (device))
 	{
@@ -191,16 +181,9 @@ static int manager_send_sms (struct mansession* s, const struct message* m)
 		return 0;
 	}
 
-	msg = send_sms(device, number, message, validity, report, &status, payload, strlen(payload));
-	snprintf (buf, sizeof (buf), "[%s] %s", device, msg);
-	if(status)
-	{
-		astman_send_ack(s, m, buf);
-	}
-	else
-	{
-		astman_send_error(s, m, buf);
-	}
+	int res = send_sms(device, number, message, validity, report, payload, strlen(payload) + 1);
+	snprintf(buf, sizeof (buf), "[%s] %s", device, res < 0 ? error2str(chan_dongle_err) : "SMS queued for send");
+	(res == 0 ? astman_send_ack : astman_send_error)(s, m, buf);
 
 	return 0;
 }
@@ -208,10 +191,7 @@ static int manager_send_sms (struct mansession* s, const struct message* m)
 #/* */
 EXPORT_DEF void manager_event_report(const char * devname, const char *payload, size_t payload_len, const char *scts, const char *dt, int success, int type, const char *report_str)
 {
-	char buf[40];
-	snprintf(buf, sizeof(buf), "DongleReport");
-
-	manager_event (EVENT_FLAG_CALL, buf,
+	manager_event (EVENT_FLAG_CALL, "DongleReport",
 		"Device: %s\r\n"
 		"Payload: %.*s\r\n"
 		"SCTS: %s\r\n"
@@ -421,8 +401,6 @@ static int manager_ccwa_set (struct mansession* s, const struct message* m)
 //	const char*	id	= astman_get_header (m, "ActionID");
 
 	char		buf[256];
-	const char*	msg;
-	int		status;
 	call_waiting_t	enable;
 
 	if (ast_strlen_zero (device))
@@ -441,9 +419,9 @@ static int manager_ccwa_set (struct mansession* s, const struct message* m)
 		return 0;
 	}
 
-	msg = send_ccwa_set(device, enable, &status);
-	snprintf (buf, sizeof (buf), "[%s] %s", device, msg);
-	(status ? astman_send_ack : astman_send_error)(s, m, buf);
+	int res = send_ccwa_set(device, enable);
+	snprintf (buf, sizeof (buf), "[%s] %s", device, res < 0 ? error2str(chan_dongle_err) : "Call-Waiting commands queued for execute");
+	(res == 0 ? astman_send_ack : astman_send_error)(s, m, buf);
 
 //	if(!ast_strlen_zero(id))
 //		astman_append (s, "ActionID: %s\r\n", id);
@@ -457,8 +435,6 @@ static int manager_reset (struct mansession* s, const struct message* m)
 //	const char*	id	= astman_get_header (m, "ActionID");
 
 	char		buf[256];
-	const char*	msg;
-	int		status;
 
 	if (ast_strlen_zero (device))
 	{
@@ -466,9 +442,9 @@ static int manager_reset (struct mansession* s, const struct message* m)
 		return 0;
 	}
 
-	msg = send_reset(device, &status);
-	snprintf (buf, sizeof (buf), "[%s] %s", device, msg);
-	(status ? astman_send_ack : astman_send_error)(s, m, buf);
+	int res = send_reset(device);
+	snprintf (buf, sizeof (buf), "[%s] %s", device, res < 0 ? error2str(chan_dongle_err) : "Reset command queued for execute");
+	(res == 0 ? astman_send_ack : astman_send_error)(s, m, buf);
 
 //	if(!ast_strlen_zero(id))
 //		astman_append (s, "ActionID: %s\r\n", id);
@@ -486,8 +462,7 @@ static int manager_restart_action(struct mansession * s, const struct message * 
 //	const char * id = astman_get_header (m, "ActionID");
 
 	char buf[256];
-	const char * msg;
-	int status;
+	int res;
 	unsigned i;
 
 	if (ast_strlen_zero (device))
@@ -500,9 +475,9 @@ static int manager_restart_action(struct mansession * s, const struct message * 
 	{
 		if(event == DEV_STATE_STARTED || strcasecmp(when, b_choices[i]) == 0)
 		{
-			msg = schedule_restart_event(event, i, device, &status);
-			snprintf (buf, sizeof (buf), "[%s] %s", device, msg);
-			(status ? astman_send_ack : astman_send_error)(s, m, buf);
+			res = schedule_restart_event(event, i, device);
+			snprintf(buf, sizeof (buf), "[%s] %s", device, res < 0 ? error2str(chan_dongle_err) : dev_state2str_msg(event));
+			(res == 0 ? astman_send_ack : astman_send_error)(s, m, buf);
 //			if(!ast_strlen_zero(id))
 //				astman_append (s, "ActionID: %s\r\n", id);
 			return 0;

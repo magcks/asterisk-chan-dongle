@@ -41,7 +41,7 @@ static char lut_hex2val[] = {
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 
 	-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1
 };
-static const char* lut_val2hex = "0123456789ABCDEF";
+static const char *lut_val2hex = "0123456789ABCDEF";
 
 static ssize_t convert_string(const char *in, size_t in_length, char *out, size_t out_size, char *from, char *to)
 {
@@ -54,23 +54,25 @@ static ssize_t convert_string(const char *in, size_t in_length, char *out, size_
 
 	cd = iconv_open(to, from);
 	if (cd == (ICONV_T)-1) {
-		return -2;
+		return -1;
 	}
 
-	res = iconv (cd, &in_ptr, &in_bytesleft, &out_ptr, &out_bytesleft);
+	res = iconv(cd, &in_ptr, &in_bytesleft, &out_ptr, &out_bytesleft);
 	if (res < 0) {
 		iconv_close(cd);
-		return -3;
+		return -1;
 	}
 
 	iconv_close(cd);
 
-	return (out_ptr - out);
+	return out_ptr - out;
 }
 
 EXPORT_DEF ssize_t utf8_to_ucs2(const char *in, size_t in_length, uint16_t *out, size_t out_size)
 {
-	return convert_string(in, in_length, (char*)out, out_size * 2, "UTF-8", "UTF-16BE") / 2;
+	ssize_t res = convert_string(in, in_length, (char*)out, out_size * 2, "UTF-8", "UTF-16BE");
+	if (res < 0) return res;
+	return res / 2;
 }
 EXPORT_DEF ssize_t ucs2_to_utf8(const uint16_t *in, size_t in_length, char *out, size_t out_size)
 {

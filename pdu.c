@@ -10,6 +10,7 @@
 #include "helpers.h"			/* dial_digit_code() */
 #include "char_conv.h"			/* utf8_to_hexstr_ucs2() */
 #include "gsm7_luts.h"
+#include "error.h"
 
 /* SMS-SUBMIT format
 	SCA		1..12 octet(s)		Service Center Address information element
@@ -379,13 +380,17 @@ static int pdu_store_number(uint8_t* buffer, int toa, const char *number, unsign
 	for (j = 0; j + 1 < length; j += 2) {
 		uint8_t a = pdu_digit2code(number[j]);
 		uint8_t b = pdu_digit2code(number[j + 1]);
-		if (a == 255 || b == 255) return -1;
+		if (a == 255 || b == 255) {
+			return -1;
+		}
 		buffer[i++] = a | b << 4;
 	}
 
 	if (j != length) {
 		uint8_t a = pdu_digit2code(number[j]);
-		if (a == 255) return -1;
+		if (a == 255) {
+			return -1;
+		}
 		buffer[i++] = a | 0xf0;
 	}
 	return i;
@@ -448,7 +453,7 @@ static int pdu_parse_timestamp(uint8_t *pdu, size_t length, char *out)
 
 		return 7;
 	}
-	return -EINVAL;
+	return -1;
 }
 
 EXPORT_DEF int pdu_build_mult(pdu_part_t *pdus, const char *sca, const char *dst, const uint16_t* msg, size_t msg_len, unsigned valid_minutes, int srr, uint8_t csmsref)
@@ -468,30 +473,36 @@ EXPORT_DEF int pdu_build_mult(pdu_part_t *pdus, const char *sca, const char *dst
 			unsigned septets = 0, n;
 			for (n = 0; off + n < msg_len; ++n) {
 				unsigned req = msg_gsm7[off + n] > 255 ? 2 : 1;
-				if (septets + req >= split) break;
+				if (septets + req >= split) {
+					break;
+				}
 				septets += req;
 			}
 			++cnt;
 			off += n;
 		}
 		if (cnt > 255) {
-			return -E2BIG;
+			chan_dongle_err = E_2BIG;
+			return -1;
 		}
 		off = 0;
 		while (off < msg_len) {
 			unsigned septets = 0, n;
 			for (n = 0; off + n < msg_len; ++n) {
 				unsigned req = msg_gsm7[off + n] > 255 ? 2 : 1;
-				if (septets + req >= split) break;
+				if (septets + req >= split) {
+					break;
+				}
 				septets += req;
 			}
 			pdu_udh_t udh;
 			udh.ref = csmsref;
 			udh.order = i + 1;
 			udh.parts = cnt;
-			int curlen = pdu_build(pdus[i].buffer, PDU_LENGTH, &pdus[i].tpdu_length, sca, dst, PDU_DCS_ALPHABET_7BIT, msg_gsm7 + off, n, septets, valid_minutes, srr, &udh);
+			ssize_t curlen = pdu_build(pdus[i].buffer, PDU_LENGTH, &pdus[i].tpdu_length, sca, dst, PDU_DCS_ALPHABET_7BIT, msg_gsm7 + off, n, septets, valid_minutes, srr, &udh);
 			if (curlen < 0) {
-				return curlen;
+				/* pdu_build sets chan_dongle_err */
+				return -1;
 			}
 			pdus[i].length = curlen;
 			off += n;
@@ -505,7 +516,8 @@ EXPORT_DEF int pdu_build_mult(pdu_part_t *pdus, const char *sca, const char *dst
 		}
 		cnt = (msg_len + split - 1) / split;
 		if (cnt > 255) {
-			return -E2BIG;
+			chan_dongle_err = E_2BIG;
+			return -1;
 		}
 		while (off < msg_len) {
 			unsigned r = msg_len - off;
@@ -514,9 +526,10 @@ EXPORT_DEF int pdu_build_mult(pdu_part_t *pdus, const char *sca, const char *dst
 			udh.ref = csmsref;
 			udh.order = i + 1;
 			udh.parts = cnt;
-			int curlen = pdu_build(pdus[i].buffer, PDU_LENGTH, &pdus[i].tpdu_length, sca, dst, PDU_DCS_ALPHABET_UCS2, msg + off, n, n * 2, valid_minutes, srr, &udh);
+			ssize_t curlen = pdu_build(pdus[i].buffer, PDU_LENGTH, &pdus[i].tpdu_length, sca, dst, PDU_DCS_ALPHABET_UCS2, msg + off, n, n * 2, valid_minutes, srr, &udh);
 			if (curlen < 0) {
-				return i;
+				/* pdu_build sets chan_dongle_err */
+				return -1;
 			}
 			pdus[i].length = curlen;
 			off += n;
@@ -568,7 +581,8 @@ EXPORT_DEF ssize_t pdu_build(uint8_t *buffer, size_t length, size_t *tpdulen, co
 		buffer[len++] = 1 + DIV2UP(sca_len);
 		res = pdu_store_number(buffer + len, sca_toa, sca, sca_len);
 		if (res < 0) {
-			return -EINVAL;
+			chan_dongle_err = E_BUILD_SCA;
+			return -1;
 		}
 		len += res;
 	} else {
@@ -590,7 +604,8 @@ EXPORT_DEF ssize_t pdu_build(uint8_t *buffer, size_t length, size_t *tpdulen, co
 	/*  Destination address */
 	res = pdu_store_number(buffer + len, dst_toa, dst, dst_len);
 	if (res < 0) {
-		return -EINVAL;
+		chan_dongle_err = E_BUILD_PHONE_NUMBER;
+		return -1;
 	}
 	len += res;
 
@@ -626,10 +641,12 @@ EXPORT_DEF ssize_t pdu_build(uint8_t *buffer, size_t length, size_t *tpdulen, co
 	/* also check message limit in 176 octets of TPDU */
 	*tpdulen = len - sca_len;
 	if (*tpdulen > TPDU_LENGTH) {
-		return -E2BIG;
+		chan_dongle_err = E_2BIG;
+		return -1;
 	}
 	if (len > PDU_LENGTH) {
-		return -E2BIG;
+		chan_dongle_err = E_2BIG;
+		return -1;
 	}
 
 	return len;
@@ -648,6 +665,7 @@ EXPORT_DEF int pdu_parse_sca(uint8_t *pdu, size_t pdu_length, char *sca, size_t 
 	int sca_digits = (pdu[i++] - 1) * 2;
 	int field_len = pdu_parse_number(pdu + i, pdu_length - i, sca_digits, sca, sca_len);
 	if (field_len <= 0) {
+		chan_dongle_err = E_INVALID_SCA;
 		return -1;
 	}
 	i += field_len;
@@ -656,6 +674,7 @@ EXPORT_DEF int pdu_parse_sca(uint8_t *pdu, size_t pdu_length, char *sca, size_t 
 EXPORT_DEF int tpdu_parse_type(uint8_t *pdu, size_t pdu_length, int *type)
 {
 	if (pdu_length < 1) {
+		chan_dongle_err = E_INVALID_TPDU_TYPE;
 		return -1;
 	}
 	*type = *pdu;
@@ -666,17 +685,20 @@ EXPORT_DEF int tpdu_parse_status_report(uint8_t *pdu, size_t pdu_length, int *mr
 	int i = 0, field_len;
 	const char *ret = NULL;
 	if (i + 2 > pdu_length) {
+		chan_dongle_err = E_UNKNOWN;
 		return -1;
 	}
 	*mr = pdu[i++];
 	int ra_digits = pdu[i++];
 	field_len = pdu_parse_number(pdu + i, pdu_length - i, ra_digits, ra, ra_len);
 	if (field_len < 0) {
+		chan_dongle_err = E_INVALID_PHONE_NUMBER;
 		return -1;
 	}
 	i += field_len;
 
 	if (i + 14 + 1 > pdu_length) {
+		chan_dongle_err = E_INVALID_TIMESTAMP;
 		return -1;
 	}
 	i += pdu_parse_timestamp(pdu + i, pdu_length - i, scts);
@@ -689,17 +711,20 @@ EXPORT_DEF int tpdu_parse_deliver(uint8_t *pdu, size_t pdu_length, int tpdu_type
 	int i = 0, field_len, oa_digits, pid, dcs, alphabet, ts, udl, udhl, msg_padding = 0;
 
 	if (i + 1 > pdu_length) {
+		chan_dongle_err = E_UNKNOWN;
 		return -1;
 	}
 	oa_digits = pdu[i++];
 
 	field_len = pdu_parse_number(pdu + i, pdu_length - i, oa_digits, oa, oa_len);
 	if (field_len < 0) {
+		chan_dongle_err = E_INVALID_PHONE_NUMBER;
 		return -1;
 	}
 	i += field_len;
 
 	if (i + 2 + 7 + 1 > pdu_length) {
+		chan_dongle_err = E_UNKNOWN;
 		return -1;
 	}
 
@@ -765,6 +790,7 @@ EXPORT_DEF int tpdu_parse_deliver(uint8_t *pdu, size_t pdu_length, int tpdu_type
 		case 0x3: /* HIGH 0011: Compressed regular with class */
 		case 0x6: /* HIGH 0110: Compressed, marked for self-destruct */
 		case 0x7: /* HIGH 0111: Compressed, marked for self-destruct with class */
+			chan_dongle_err = E_UNKNOWN;
 			return -1;
 		case 0xC: /* HIGH 1100: "Discard" MWI */
 		case 0xD: /* HIGH 1101: "Store" MWI */
@@ -775,19 +801,23 @@ EXPORT_DEF int tpdu_parse_deliver(uint8_t *pdu, size_t pdu_length, int tpdu_type
 			/* (dsc_lo & 3): {VM, Fax, E-mail, Other} */
 			break;
 		default:
+			chan_dongle_err = E_UNKNOWN;
 			reserved = 1;
 			break;
 		}
 		if (reserved) {
+			chan_dongle_err = E_UNKNOWN;
 			return -1;
 		}
 		if (alphabet == -1) {
+			chan_dongle_err = E_UNKNOWN;
 			return -1;
 		}
 	}
 	if (alphabet == PDU_DCS_ALPHABET_8BIT) {
 		// TODO: What to do with binary messages? Are there any?
 		// Return an error as it is dangerous to forward the raw binary data as text
+		chan_dongle_err = E_INVALID_CHARSET;
 		return -1;
 	}
 
@@ -799,11 +829,13 @@ EXPORT_DEF int tpdu_parse_deliver(uint8_t *pdu, size_t pdu_length, int tpdu_type
 		udl_bytes = (udl_nibbles + 1) / 2;
 	}
 	if (udl_bytes != pdu_length - i) {
+		chan_dongle_err = E_UNKNOWN;
 		return -1;
 	}
 
 	if (PDUTYPE_UDHI(tpdu_type) == PDUTYPE_UDHI_HAS_HEADER) {
 		if (i + 1 > pdu_length) {
+			chan_dongle_err = E_UNKNOWN;
 			return -1;
 		}
 		udhl = pdu[i++];
@@ -816,6 +848,7 @@ EXPORT_DEF int tpdu_parse_deliver(uint8_t *pdu, size_t pdu_length, int tpdu_type
 
 		/* NOTE: UDHL count octets no need calculation */
 		if (pdu_length - i < (size_t)udhl) {
+			chan_dongle_err = E_UNKNOWN;
 			return -1;
 		}
 
@@ -834,25 +867,37 @@ EXPORT_DEF int tpdu_parse_deliver(uint8_t *pdu, size_t pdu_length, int tpdu_type
 			if (iei_len >= 0 && iei_len <= udhl) {
 				switch (iei_type) {
 				case 0x00: /* Concatenated */
-					if (iei_len != 3) return -1;
+					if (iei_len != 3) {
+						chan_dongle_err = E_UNKNOWN;
+						return -1;
+					}
 					udh->ref = pdu[i++];
 					udh->parts = pdu[i++];
 					udh->order = pdu[i++];
 					udhl -= 3;
 					break;
 				case 0x08: /* Concatenated, 16 bit ref */
-					if (iei_len != 4) return -1;
+					if (iei_len != 4) {
+						chan_dongle_err = E_UNKNOWN;
+						return -1;
+					}
 					udh->ref = (pdu[i++] << 8) | pdu[i++];
 					udh->parts = pdu[i++];
 					udh->order = pdu[i++];
 					udhl -= 4;
 					break;
 				case 0x24: /* National Language Single Shift */
-					if (iei_len != 1) return -1;
+					if (iei_len != 1) {
+						chan_dongle_err = E_UNKNOWN;
+						return -1;
+					}
 					udh->ss = pdu[i++];
 					break;
 				case 0x25: /* National Language Single Shift */
-					if (iei_len != 1) return -1;
+					if (iei_len != 1) {
+						chan_dongle_err = E_UNKNOWN;
+						return -1;
+					}
 					udh->ls = pdu[i++];
 					break;
 				default:
@@ -860,9 +905,8 @@ EXPORT_DEF int tpdu_parse_deliver(uint8_t *pdu, size_t pdu_length, int tpdu_type
 					i += iei_len;
 					udhl -= iei_len;
 				}
-			}
-			else
-			{
+			} else {
+				chan_dongle_err = E_UNKNOWN;
 				return -1;
 			}
 		}
@@ -874,7 +918,10 @@ EXPORT_DEF int tpdu_parse_deliver(uint8_t *pdu, size_t pdu_length, int tpdu_type
 	int msg_len = pdu_length - i, out_len;
 	if (alphabet == PDU_DCS_ALPHABET_7BIT) {
 		out_len = gsm7_unpack_decode(pdu + i, udl_nibbles, msg, 1024 /* assume enough memory, as SMS messages are limited in size */, msg_padding, udh->ls, udh->ss);
-		if (out_len < 0) return -1;
+		if (out_len < 0) {
+			chan_dongle_err = E_DECODE_GSM7;
+			return -1;
+		}
 	} else {
 		out_len = msg_len / 2;
 		memcpy((char*)msg, pdu + i, msg_len);

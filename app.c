@@ -22,6 +22,7 @@
 #include "app.h"		/* app_register() app_unregister() */
 #include "chan_dongle.h"	/* struct pvt */
 #include "helpers.h"		/* send_sms() ITEMS_OF() */
+#include "error.h"
 
 struct ast_channel;
 
@@ -74,8 +75,6 @@ static int app_status_exec (struct ast_channel* channel, const char* data)
 static int app_send_sms_exec (attribute_unused struct ast_channel* channel, const char* data)
 {
 	char*	parse;
-	const char* msg;
-	int status;
 
 	AST_DECLARE_APP_ARGS (args,
 		AST_APP_ARG (device);
@@ -107,17 +106,16 @@ static int app_send_sms_exec (attribute_unused struct ast_channel* channel, cons
 		return -1;
 	}
 
-	msg = send_sms(args.device, args.number, args.message, args.validity, args.report, &status, args.payload, strlen(args.payload));
-	if(!status)
-		ast_log (LOG_ERROR, "[%s] %s\n", args.device, msg);
-	return !status;
+	if (send_sms(args.device, args.number, args.message, args.validity, args.report, args.payload, strlen(args.payload) + 1) < 0) {
+		ast_log(LOG_ERROR, "[%s] %s\n", args.device, error2str(chan_dongle_err));
+		return -1;
+	}
+	return 0;
 }
 
 static int app_send_ussd_exec(attribute_unused struct ast_channel* channel, const char* data)
 {
 	char* parse;
-	const char* msg;
-	int status;
 
 	AST_DECLARE_APP_ARGS(args,
 		 AST_APP_ARG(device);
@@ -145,12 +143,11 @@ static int app_send_ussd_exec(attribute_unused struct ast_channel* channel, cons
 		return -1;
 	}
 
-	msg = send_ussd(args.device, args.ussd, &status);
-	if(!status)
-	{
-		ast_log(LOG_ERROR, "[%s] %s\n", args.device, msg);
+	if (send_ussd(args.device, args.ussd) < 0) {
+		ast_log(LOG_ERROR, "[%s] %s\n", args.device, error2str(chan_dongle_err));
+		return -1;
 	}
-	return !status;
+	return 0;
 }
 
 

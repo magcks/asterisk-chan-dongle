@@ -148,25 +148,25 @@ INLINE_DECL const char* at_cmd2str (at_cmd_t cmd)
 
 struct cpvt;
 
-EXPORT_DECL const char* at_cmd2str (at_cmd_t cmd);
-EXPORT_DECL int at_enque_initialization(struct cpvt * cpvt, at_cmd_t from_command);
-EXPORT_DECL int at_enque_ping (struct cpvt * cpvt);
-EXPORT_DECL int at_enque_cops (struct cpvt * cpvt);
-EXPORT_DECL int at_enque_sms (struct cpvt * cpvt, const char * number, const char * msg, unsigned validity_min, int report_req, const char *payload, size_t payload_len);
-EXPORT_DECL int at_enque_ussd (struct cpvt * cpvt, const char * code);
-EXPORT_DECL int at_enque_dtmf (struct cpvt * cpvt, char digit);
-EXPORT_DECL int at_enque_set_ccwa (struct cpvt * cpvt, attribute_unused const char * unused1, attribute_unused const char * unused2, unsigned call_waiting);
-EXPORT_DECL int at_enque_reset (struct cpvt * cpvt);
-EXPORT_DECL int at_enque_dial(struct cpvt * cpvt, const char * number, int clir);
-EXPORT_DECL int at_enque_answer(struct cpvt * cpvt);
-EXPORT_DECL int at_enque_user_cmd(struct cpvt * cpvt, const char * input);
-EXPORT_DECL int at_enque_retrive_sms(struct cpvt * cpvt, int index, int delete);
-EXPORT_DECL int at_enque_hangup (struct cpvt * cpvt, int call_idx);
-EXPORT_DECL int at_enque_volsync (struct cpvt * cpvt);
-EXPORT_DECL int at_enque_clcc (struct cpvt * cpvt);
-EXPORT_DECL int at_enque_activate (struct cpvt * cpvt);
-EXPORT_DECL int at_enque_flip_hold (struct cpvt * cpvt);
-EXPORT_DECL int at_enque_conference (struct cpvt * cpvt);
-EXPORT_DECL void at_hangup_immediality(struct cpvt * cpvt);
+EXPORT_DECL const char *at_cmd2str(at_cmd_t cmd);
+EXPORT_DECL int at_enqueue_initialization(struct cpvt *cpvt, at_cmd_t from_command);
+EXPORT_DECL int at_enqueue_ping(struct cpvt *cpvt);
+EXPORT_DECL int at_enqueue_cops(struct cpvt *cpvt);
+EXPORT_DECL int at_enqueue_sms(struct cpvt *cpvt, const char *number, const char *msg, unsigned validity_min, int report_req, const char *payload, size_t payload_len);
+EXPORT_DECL int at_enqueue_ussd(struct cpvt *cpvt, const char *code);
+EXPORT_DECL int at_enqueue_dtmf(struct cpvt *cpvt, char digit);
+EXPORT_DECL int at_enqueue_set_ccwa(struct cpvt *cpvt, unsigned call_waiting);
+EXPORT_DECL int at_enqueue_reset(struct cpvt *cpvt);
+EXPORT_DECL int at_enqueue_dial(struct cpvt *cpvt, const char *number, int clir);
+EXPORT_DECL int at_enqueue_answer(struct cpvt *cpvt);
+EXPORT_DECL int at_enqueue_user_cmd(struct cpvt *cpvt, const char *input);
+EXPORT_DECL int at_enqueue_retrieve_sms(struct cpvt *cpvt, int index, int delete);
+EXPORT_DECL int at_enqueue_hangup(struct cpvt *cpvt, int call_idx);
+EXPORT_DECL int at_enqueue_volsync(struct cpvt *cpvt);
+EXPORT_DECL int at_enqueue_clcc(struct cpvt *cpvt);
+EXPORT_DECL int at_enqueue_activate(struct cpvt *cpvt);
+EXPORT_DECL int at_enqueue_flip_hold(struct cpvt *cpvt);
+EXPORT_DECL int at_enqueue_conference(struct cpvt *cpvt);
+EXPORT_DECL void at_hangup_immediality(struct cpvt *cpvt);
 
 #endif /* CHAN_DONGLE_AT_SEND_H_INCLUDED */
