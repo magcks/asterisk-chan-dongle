@@ -1,7 +1,7 @@
 # Tested devices
 
 
-| Model        | Brading                 | Country  | Locked | USSD | SMS | Calls 
+| Model        | Branding                | Country  | Locked | USSD | SMS | Calls 
 | ------------ |:-----------------------:| --------:| ------:| ----:| ---:| -----:
 | E1762        | BILDmobil Speedstick    | Germany  | No     | Yes  | Yes | Yes
 | E3531s-2     | Tchibo Surfstick        | Germany  | Yes    | Yes  | Yes | No
