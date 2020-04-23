@@ -11,6 +11,7 @@
 #define SMSDB_DST_MAX_LEN 256
 
 EXPORT_DECL int smsdb_init();
+EXPORT_DECL void smsdb_atexit();
 EXPORT_DECL int smsdb_put(const char *id, const char *addr, int ref, int parts, int order, const char *msg, char *out);
 EXPORT_DECL int smsdb_get_refid(const char *id, const char *addr);
 EXPORT_DECL int smsdb_outgoing_add(const char *id, const char *addr, int cnt, int ttl, int srr, const char *payload, size_t len);

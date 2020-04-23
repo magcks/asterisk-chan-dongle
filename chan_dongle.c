@@ -373,7 +373,8 @@ EXPORT_DEF void clean_read_data(const char * devname, int fd)
 
 static void handle_expired_reports(struct pvt *pvt)
 {
-	char dst[SMSDB_DST_MAX_LEN], payload[SMSDB_PAYLOAD_MAX_LEN];
+	char dst[SMSDB_DST_MAX_LEN];
+	char payload[SMSDB_PAYLOAD_MAX_LEN];
 	ssize_t payload_len = smsdb_outgoing_purge_one(dst, payload);
 	if (payload_len >= 0) {
 		ast_verb (3, "[%s] TTL payload: %.*s\n", PVT_ID(pvt), payload_len, payload);
@@ -1783,6 +1784,7 @@ static int unload_module()
 	pdiscovery_fini();
 
 	ast_free(gpublic);
+	smsdb_atexit();
 	gpublic = NULL;
 	return 0;
 }

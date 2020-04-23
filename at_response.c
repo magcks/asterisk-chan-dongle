@@ -1787,8 +1787,7 @@ int at_response (struct pvt* pvt, const struct iovec iov[2], int iovcnt, at_res_
 		}
 		str[len] = '\0';
 
-/*		ast_debug (5, "[%s] [%.*s]\n", PVT_ID(pvt), (int) len, str);
-*/
+// 		ast_debug (5, "[%s] [%.*s]\n", PVT_ID(pvt), (int) len, str);
 
 		if(ecmd && ecmd->cmd == CMD_USER) {
 			ast_verb(1, "[%s] Got Response for user's command:'%s'\n", PVT_ID(pvt), str);

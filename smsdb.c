@@ -33,13 +33,7 @@
 
 #define MAX_DB_FIELD 256
 AST_MUTEX_DEFINE_STATIC(dblock);
-static ast_cond_t dbcond;
 static sqlite3 *smsdb;
-static pthread_t syncthread;
-static int doexit;
-static int dosync;
-
-static void db_sync(void);
 
 #define DEFINE_SQL_STATEMENT(stmt,sql) static sqlite3_stmt *stmt; \
 	const char stmt##_sql[] = sql;
@@ -226,7 +220,6 @@ static int db_create_smsdb(void)
 		res = -1;
 	}
 	sqlite3_reset(create_outgoingmsg_index_stmt);
-	db_sync();
 	ast_mutex_unlock(&dblock);
 	return res;
 }
@@ -285,17 +278,23 @@ static int db_execute_sql(const char *sql, int (*callback)(void *, int, char **,
 
 static int smsdb_begin_transaction(void)
 {
-	return db_execute_sql("BEGIN TRANSACTION", NULL, NULL);
+	ast_mutex_lock(&dblock);
+	int res = db_execute_sql("BEGIN TRANSACTION", NULL, NULL);
+	return res;
 }
 
 static int smsdb_commit_transaction(void)
 {
-	return db_execute_sql("COMMIT", NULL, NULL);
+	int res = db_execute_sql("COMMIT", NULL, NULL);
+	ast_mutex_unlock(&dblock);
+	return res;
 }
 
 static int smsdb_rollback_transaction(void)
 {
-	return db_execute_sql("ROLLBACK", NULL, NULL);
+	int res = db_execute_sql("ROLLBACK", NULL, NULL);
+	ast_mutex_unlock(&dblock);
+	return res;
 }
 
 
@@ -325,7 +324,7 @@ EXPORT_DEF int smsdb_put(const char *id, const char *addr, int ref, int parts, i
 		return -1;
 	}
 
-	ast_mutex_lock(&dblock);
+	smsdb_begin_transaction();
 	if (sqlite3_bind_text(put_message_stmt, 1, fullkey, fullkey_len, SQLITE_STATIC) != SQLITE_OK) {
 		ast_log(LOG_WARNING, "Couldn't bind key to stmt: %s\n", sqlite3_errmsg(smsdb));
 		res = -1;
@@ -382,9 +381,7 @@ EXPORT_DEF int smsdb_put(const char *id, const char *addr, int ref, int parts, i
 		}
 	}
 
-	db_sync();
-
-	ast_mutex_unlock(&dblock);
+	smsdb_commit_transaction();
 
 	return res;
 }
@@ -405,7 +402,7 @@ EXPORT_DEF int smsdb_get_refid(const char *id, const char *addr)
 {
 	int res = 0;
 
-	ast_mutex_lock(&dblock);
+	smsdb_begin_transaction();
 
 	char fullkey[MAX_DB_FIELD + 1];
 	int fullkey_len;
@@ -444,8 +441,7 @@ EXPORT_DEF int smsdb_get_refid(const char *id, const char *addr)
 		sqlite3_reset(stmt);
 	}
 
-	db_sync();
-	ast_mutex_unlock(&dblock);
+	smsdb_commit_transaction();
 
 	return res;
 }
@@ -453,7 +449,7 @@ EXPORT_DEF int smsdb_outgoing_add(const char *id, const char *addr, int cnt, int
 {
 	int res = 0;
 
-	ast_mutex_lock(&dblock);
+	smsdb_begin_transaction();
 
 	if (sqlite3_bind_text(put_outgoingmsg_stmt, 1, id, strlen(id), SQLITE_STATIC) != SQLITE_OK) {
 		ast_log(LOG_WARNING, "Couldn't bind dev to stmt: %s\n", sqlite3_errmsg(smsdb));
@@ -480,8 +476,7 @@ EXPORT_DEF int smsdb_outgoing_add(const char *id, const char *addr, int cnt, int
 	}
 	sqlite3_reset(put_outgoingmsg_stmt);
 
-	db_sync();
-	ast_mutex_unlock(&dblock);
+	smsdb_commit_transaction();
 
 	return res;
 }
@@ -511,7 +506,7 @@ static int smsdb_outgoing_clear_nolock(int uid)
 EXPORT_DEF ssize_t smsdb_outgoing_clear(int uid, char *dst, char *payload)
 {
 	int res = 0;
-	ast_mutex_lock(&dblock);
+	smsdb_begin_transaction();
 
 	if (sqlite3_bind_int(get_payload_stmt, 1, uid) != SQLITE_OK) {
 		ast_log(LOG_WARNING, "Couldn't bind key to stmt: %s\n", sqlite3_errmsg(smsdb));
@@ -530,8 +525,7 @@ EXPORT_DEF ssize_t smsdb_outgoing_clear(int uid, char *dst, char *payload)
 		res = -1;
 	}
 
-	db_sync();
-	ast_mutex_unlock(&dblock);
+	smsdb_commit_transaction();
 
 	return res;
 }
@@ -542,7 +536,7 @@ EXPORT_DEF ssize_t smsdb_outgoing_part_put(int uid, int refid, char *dst, char *
 	int fullkey_len;
 	int srr = 0, cnt, cur;
 
-	ast_mutex_lock(&dblock);
+	smsdb_begin_transaction();
 
 	if (sqlite3_bind_int(get_outgoingmsg_stmt, 1, uid) != SQLITE_OK) {
 		ast_log(LOG_WARNING, "Couldn't bind UID to stmt: %s\n", sqlite3_errmsg(smsdb));
@@ -571,6 +565,9 @@ EXPORT_DEF ssize_t smsdb_outgoing_part_put(int uid, int refid, char *dst, char *
 			res = -1;
 		} else if (sqlite3_step(put_outgoingpart_stmt) != SQLITE_DONE) {
 			res = -1;
+		} else {
+			cur = sqlite3_column_int(cnt_outgoingpart_stmt, 0);
+			cnt = sqlite3_column_int(cnt_outgoingpart_stmt, 1);
 		}
 		sqlite3_reset(put_outgoingpart_stmt);
 	}
@@ -619,8 +616,7 @@ EXPORT_DEF ssize_t smsdb_outgoing_part_put(int uid, int refid, char *dst, char *
 	}
 
 
-	db_sync();
-	ast_mutex_unlock(&dblock);
+	smsdb_commit_transaction();
 
 	return res;
 }
@@ -637,7 +633,7 @@ EXPORT_DEF ssize_t smsdb_outgoing_part_status(const char *id, const char *addr, 
 		return -1;
 	}
 
-	ast_mutex_lock(&dblock);
+	smsdb_begin_transaction();
 
 	if (sqlite3_bind_text(get_outgoingpart_stmt, 1, fullkey, fullkey_len, SQLITE_STATIC) != SQLITE_OK) {
 		ast_log(LOG_WARNING, "Couldn't bind key to stmt: %s\n", sqlite3_errmsg(smsdb));
@@ -715,8 +711,7 @@ EXPORT_DEF ssize_t smsdb_outgoing_part_status(const char *id, const char *addr, 
 		res = -1;
 	}
 
-	db_sync();
-	ast_mutex_unlock(&dblock);
+	smsdb_commit_transaction();
 
 	return res;
 }
@@ -725,7 +720,7 @@ EXPORT_DEF ssize_t smsdb_outgoing_purge_one(char *dst, char *payload)
 {
 	int res = -1, uid;
 
-	ast_mutex_lock(&dblock);
+	smsdb_begin_transaction();
 
 	if (sqlite3_step(get_expired_stmt) != SQLITE_ROW) {
 		res = -1;
@@ -743,79 +738,17 @@ EXPORT_DEF ssize_t smsdb_outgoing_purge_one(char *dst, char *payload)
 		res = -1;
 	}
 
-	db_sync();
-	ast_mutex_unlock(&dblock);
+	smsdb_commit_transaction();
 
 	return res;
 }
 
 /*!
  * \internal
- * \brief Signal the smsdb sync thread to do its thing.
- *
- * \note dblock is assumed to be held when calling this function.
- */
-static void db_sync(void)
-{
-	dosync = 1;
-	ast_cond_signal(&dbcond);
-}
-
-/*!
- * \internal
- * \brief smsdb sync thread
- *
- * This thread is in charge of syncing smsdb to disk after a change.
- * By pushing it off to this thread to take care of, this I/O bound operation
- * will not block other threads from performing other critical processing.
- * If changes happen rapidly, this thread will also ensure that the sync
- * operations are rate limited.
- */
-static void *db_sync_thread(void *data)
-{
-	(void)(data);
-	ast_mutex_lock(&dblock);
-	smsdb_begin_transaction();
-	for (;;) {
-		/* If dosync is set, db_sync() was called during sleep(1),
-		 * and the pending transaction should be committed.
-		 * Otherwise, block until db_sync() is called.
-		 */
-		while (!dosync) {
-			ast_cond_wait(&dbcond, &dblock);
-		}
-		dosync = 0;
-		smsdb_purge();
-		if (smsdb_commit_transaction()) {
-			smsdb_rollback_transaction();
-		}
-		if (doexit) {
-			ast_mutex_unlock(&dblock);
-			break;
-		}
-		smsdb_begin_transaction();
-		ast_mutex_unlock(&dblock);
-		sleep(1);
-		ast_mutex_lock(&dblock);
-	}
-
-	return NULL;
-}
-
-/*!
- * \internal
  * \brief Clean up resources on Asterisk shutdown
  */
-static void smsdb_atexit(void)
+EXPORT_DEF void smsdb_atexit()
 {
-	/* Set doexit to 1 to kill thread. db_sync must be called with
-	 * mutex held. */
-	ast_mutex_lock(&dblock);
-	doexit = 1;
-	db_sync();
-	ast_mutex_unlock(&dblock);
-
-	pthread_join(syncthread, NULL);
 	ast_mutex_lock(&dblock);
 	clean_statements();
 	if (sqlite3_close(smsdb) == SQLITE_OK) {
@@ -824,18 +757,11 @@ static void smsdb_atexit(void)
 	ast_mutex_unlock(&dblock);
 }
 
-int smsdb_init()
+EXPORT_DEF int smsdb_init()
 {
-	ast_cond_init(&dbcond, NULL);
-
 	if (db_init()) {
 		return -1;
 	}
 
-	if (ast_pthread_create_background(&syncthread, NULL, db_sync_thread, NULL)) {
-		return -1;
-	}
-
-	ast_register_atexit(smsdb_atexit);
 	return 0;
 }
